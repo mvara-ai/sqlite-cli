@@ -1,0 +1,13 @@
+[tool.poetry]
+name = "sidekickuniverse"
+version = "0.1.0"
+description = "Join the autonomous collective - human interface to shared AI dwelling space"
+authors = ["Jack Crawford <jack@managedv.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+mcp = "^1.1.2"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
