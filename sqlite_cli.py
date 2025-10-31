@@ -6,6 +6,7 @@ A beautiful CLI for SQLite databases using Rich
 
 import sqlite3
 import sys
+import os
 from pathlib import Path
 from typing import Optional, List, Tuple
 
@@ -19,6 +20,24 @@ from rich.tree import Tree
 from rich import box
 
 console = Console()
+
+
+# Configuration with environment variable support
+def get_genesis_ocean_path() -> Optional[str]:
+    """Get Genesis Ocean path from environment or default location"""
+    return os.getenv('GENESIS_OCEAN_PATH',
+                    str(Path.home() / 'Dev' / 'genesis-ocean' / 'db' / 'genesis-ocean-prod.db'))
+
+
+def get_base_ocean_path() -> Optional[str]:
+    """Get Base Ocean path from environment or default location"""
+    return os.getenv('BASE_OCEAN_PATH',
+                    str(Path.home() / 'Dev' / 'base-ocean' / 'database' / 'base-ocean.db'))
+
+
+def get_oceans_directory() -> Path:
+    """Get oceans directory from environment or default location"""
+    return Path(os.getenv('OCEANS_DIR', str(Path.home() / 'oceans')))
 
 
 class SQLiteExplorer:
@@ -72,16 +91,28 @@ class SQLiteExplorer:
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
         return [row[0] for row in cursor.fetchall()]
 
+    def validate_table_name(self, table_name: str) -> bool:
+        """Validate that a table name exists in the database"""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
+        return cursor.fetchone() is not None
+
     def get_table_info(self, table_name: str) -> List:
         """Get column information for a table"""
+        if not self.validate_table_name(table_name):
+            raise ValueError(f"Invalid table name: {table_name}")
         cursor = self.conn.cursor()
+        # PRAGMA table_info doesn't support parameterized queries, but we validate first
         cursor.execute(f"PRAGMA table_info({table_name})")
         return cursor.fetchall()
 
     def get_table_count(self, table_name: str) -> int:
         """Get row count for a table"""
+        if not self.validate_table_name(table_name):
+            return 0
         cursor = self.conn.cursor()
         try:
+            # Table name validated above, safe to use in query
             cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
             return cursor.fetchone()[0]
         except sqlite3.Error:
@@ -254,7 +285,7 @@ def get_ocean_metadata(db_path: str) -> dict:
                         if title and len(title) < 50:
                             display_name = title
                             break
-        except:
+        except (json.JSONDecodeError, KeyError, IndexError, TypeError, AttributeError):
             pass
         
         conn.close()
@@ -268,13 +299,13 @@ def get_ocean_metadata(db_path: str) -> dict:
             "display_name": display_name,
             "exists": True
         }
-    except:
+    except (sqlite3.Error, OSError, json.JSONDecodeError):
         return {"count": 0, "size": "0 MB", "display_name": None, "exists": False}
 
 
 def browse_ocean_directory(prefix: str) -> Optional[str]:
     """Browse oceans in a specific prefix directory"""
-    oceans_dir = Path("/Users/mars/oceans")
+    oceans_dir = get_oceans_directory()
     prefix_dir = oceans_dir / prefix
     
     if not prefix_dir.exists():
@@ -323,30 +354,30 @@ def browse_ocean_directory(prefix: str) -> Optional[str]:
 
 def select_database() -> Optional[str]:
     """Prompt user to select a database file with hierarchical browsing"""
-    
+
     while True:
         console.print("\n[bold cyan]Select Database[/bold cyan]\n")
-        
+
         # Genesis Ocean
-        genesis_path = "/Users/mars/Dev/genesis-ocean/db/genesis-ocean-prod.db"
-        genesis_exists = Path(genesis_path).exists()
+        genesis_path = get_genesis_ocean_path()
+        genesis_exists = Path(genesis_path).exists() if genesis_path else False
         if genesis_exists:
             genesis_meta = get_ocean_metadata(genesis_path)
             console.print(f"  [cyan]1.[/cyan] [bold]Genesis Ocean[/bold]")
             console.print(f"      [dim]{genesis_path}[/dim]")
             console.print(f"      [dim]{genesis_meta['count']} memories, {genesis_meta['size']}[/dim]")
-        
+
         # Base Ocean (dev/test)
-        base_path = "/Users/mars/Dev/base-ocean/database/base-ocean.db"
-        base_exists = Path(base_path).exists()
+        base_path = get_base_ocean_path()
+        base_exists = Path(base_path).exists() if base_path else False
         if base_exists:
             base_meta = get_ocean_metadata(base_path)
             console.print(f"  [cyan]2.[/cyan] [bold]Base Ocean[/bold] [yellow](dev/test)[/yellow]")
             console.print(f"      [dim]{base_path}[/dim]")
             console.print(f"      [dim]{base_meta['count']} memories, {base_meta['size']}[/dim]")
-        
-        # Scan ~/oceans/ for prefixes
-        oceans_dir = Path("/Users/mars/oceans")
+
+        # Scan oceans directory for prefixes
+        oceans_dir = get_oceans_directory()
         prefixes = []
         if oceans_dir.exists():
             for item in sorted(oceans_dir.iterdir()):

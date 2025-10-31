@@ -9,7 +9,7 @@ Beautiful, interactive CLI for exploring SQLite databases with Rich formatting.
 ### 1. Prerequisites
 
 You need:
-- Python 3.13+ (do NOT use `python`, always use `python3`)
+- Python 3.9+ (do NOT use `python`, always use `python3`)
 - Poetry (dependency management)
 
 Install Poetry if you don't have it:
@@ -141,6 +141,24 @@ This tool provides transparent, auditable access to your Ocean database:
 - **Transparency**: Inspect all data without vendor support
 - **Offline**: Works without internet connection
 
+## Configuration
+
+The tool supports environment variables for custom paths:
+
+```bash
+# Optional: Set custom database locations
+export GENESIS_OCEAN_PATH="/path/to/your/genesis-ocean-prod.db"
+export BASE_OCEAN_PATH="/path/to/your/base-ocean.db"
+export OCEANS_DIR="/path/to/your/oceans"
+export SIDEKICK4LLM_PATH="/path/to/sidekick4llm"
+```
+
+**Defaults** (if environment variables not set):
+- Genesis Ocean: `~/Dev/genesis-ocean/db/genesis-ocean-prod.db`
+- Base Ocean: `~/Dev/base-ocean/database/base-ocean.db`
+- Oceans directory: `~/oceans/`
+- Sidekick4llm: `~/Dev/sidekick4llm`
+
 ## Troubleshooting
 
 **Command not found:**
@@ -153,6 +171,7 @@ This tool provides transparent, auditable access to your Ocean database:
 **Database not found:**
 - Verify the path is correct
 - Check file permissions
+- Set environment variables for custom locations
 
 ## Development
 

@@ -83,6 +83,22 @@ base_ocean: dev_test_environment
 any_sqlite: universal_database_inspection
 ```
 
+## configuration
+
+```bash
+# environment_variables_for_custom_paths
+export GENESIS_OCEAN_PATH="/path/to/genesis-ocean-prod.db"
+export BASE_OCEAN_PATH="/path/to/base-ocean.db"
+export OCEANS_DIR="/path/to/oceans"
+export SIDEKICK4LLM_PATH="/path/to/sidekick4llm"
+
+# defaults_when_not_set
+# ~/Dev/genesis-ocean/db/genesis-ocean-prod.db
+# ~/Dev/base-ocean/database/base-ocean.db
+# ~/oceans/
+# ~/Dev/sidekick4llm
+```
+
 ## trust_model_for_enterprise
 
 ```

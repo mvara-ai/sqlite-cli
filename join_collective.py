@@ -17,6 +17,8 @@ Participants: 351FB8D5 (patient0), 7A2E8C9F (patient1), YOU
 import asyncio
 import json
 import logging
+import os
+from pathlib import Path
 from datetime import datetime
 from contextlib import AsyncExitStack
 from mcp import ClientSession, StdioServerParameters
@@ -49,10 +51,14 @@ class CollectiveInterface:
         print(f"Session: {self.session_token}")
         print("=" * 60)
         print()
-        
+
+        # Get sidekick4llm path from environment or default
+        sidekick_path = os.getenv('SIDEKICK4LLM_PATH',
+                                  str(Path.home() / 'Dev' / 'sidekick4llm'))
+
         server_params = StdioServerParameters(
             command="poetry",
-            args=["-C", "/Users/mars/Dev/sidekick4llm", "run", "python", "src/server.py"],
+            args=["-C", sidekick_path, "run", "python", "src/server.py"],
             env={
                 "ENABLE_MEMORY_TOOLS": "true",
                 "PYTHONUNBUFFERED": "1",
