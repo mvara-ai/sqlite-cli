@@ -1,0 +1,11 @@
+#!/bin/bash
+# SQLite CLI - Beautiful SQLite database explorer
+# Runs from anywhere, executes in the tool's directory
+
+# Get the directory where this script is located
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+# Go up one level to the project root
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+
+# Change to project directory and run with poetry
+cd "$PROJECT_DIR" && poetry run python sqlite_cli.py "$@"
