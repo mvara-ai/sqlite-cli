@@ -43,14 +43,21 @@ class SQLiteExplorer:
         if self.conn:
             self.conn.close()
 
-    def execute_query(self, query: str) -> Tuple[bool, Optional[List], Optional[str]]:
+    def execute_query(self, query: str, read_only: bool = True) -> Tuple[bool, Optional[List], Optional[str]]:
         """Execute a SQL query and return results"""
+        # Block write operations in read-only mode
+        if read_only:
+            query_upper = query.strip().upper()
+            write_keywords = ['INSERT', 'UPDATE', 'DELETE', 'DROP', 'CREATE', 'ALTER', 'TRUNCATE', 'REPLACE']
+            if any(query_upper.startswith(keyword) for keyword in write_keywords):
+                return False, None, "Write operations are disabled in read-only mode. Only SELECT and PRAGMA queries are allowed."
+        
         try:
             cursor = self.conn.cursor()
             cursor.execute(query)
 
             # Check if it's a SELECT query
-            if query.strip().upper().startswith('SELECT'):
+            if query.strip().upper().startswith('SELECT') or query.strip().upper().startswith('PRAGMA'):
                 results = cursor.fetchall()
                 return True, results, None
             else:
@@ -74,30 +81,49 @@ class SQLiteExplorer:
     def get_table_count(self, table_name: str) -> int:
         """Get row count for a table"""
         cursor = self.conn.cursor()
-        cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
-        return cursor.fetchone()[0]
+        try:
+            cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
+            return cursor.fetchone()[0]
+        except sqlite3.Error:
+            # FTS tables or views might not support COUNT(*)
+            return 0
 
 
-def display_results(results: List, title: str = "Query Results"):
+def display_results(results: List, title: str = "Query Results", max_rows: int = 50):
     """Display query results as a beautiful Rich table"""
     if not results:
         console.print("[yellow]No results found[/yellow]")
         return
 
-    # Create table
-    table = Table(title=title, box=box.ROUNDED, show_header=True, header_style="bold magenta")
+    total_rows = len(results)
+    truncated = total_rows > max_rows
+    display_results = results[:max_rows] if truncated else results
+
+    # Create table with row separators
+    table = Table(
+        title=title, 
+        box=box.ROUNDED, 
+        show_header=True, 
+        header_style="bold magenta",
+        row_styles=["", "dim"],  # Alternate row styling
+        show_lines=True  # Show lines between rows
+    )
 
     # Add columns
-    columns = results[0].keys()
+    columns = display_results[0].keys()
     for col in columns:
         table.add_column(col, style="cyan", overflow="fold")
 
     # Add rows
-    for row in results:
+    for row in display_results:
         table.add_row(*[str(val) if val is not None else "[dim]NULL[/dim]" for val in row])
 
     console.print(table)
-    console.print(f"[dim]Total rows: {len(results)}[/dim]\n")
+    if truncated:
+        console.print(f"[yellow]⚠ Showing first {max_rows} of {total_rows} rows[/yellow]")
+        console.print(f"[dim]Tip: Add LIMIT to your query to control results[/dim]\n")
+    else:
+        console.print(f"[dim]Total rows: {total_rows}[/dim]\n")
 
 
 def display_schema(explorer: SQLiteExplorer):
@@ -124,16 +150,28 @@ def display_schema(explorer: SQLiteExplorer):
     console.print(tree)
 
 
-def interactive_mode(explorer: SQLiteExplorer):
-    """Run interactive query mode"""
+def show_help():
+    """Display help panel"""
     console.print(Panel.fit(
         "[bold green]Interactive SQLite Mode[/bold green]\n"
         "Type your SQL queries or commands:\n"
         "  [cyan].schema[/cyan] - Show database schema\n"
         "  [cyan].tables[/cyan] - List all tables\n"
-        "  [cyan].exit[/cyan] or [cyan].quit[/cyan] - Exit interactive mode",
+        "  [cyan].db[/cyan] - Switch database\n"
+        "  [cyan].help[/cyan] - Show this help\n"
+        "  [cyan].exit[/cyan] or [cyan].quit[/cyan] - Exit to command line\n\n"
+        "[bold yellow]SQL Queries:[/bold yellow]\n"
+        "Just type any SQL statement and press Enter:\n"
+        "  [dim]SELECT * FROM memories[/dim]\n"
+        "  [dim]SELECT memory_uuid, created_at FROM memories LIMIT 5[/dim]\n"
+        "  [dim]SELECT json_extract(payload, '$.gist') FROM memories[/dim]",
         border_style="blue"
     ))
+
+
+def interactive_mode(explorer: SQLiteExplorer):
+    """Run interactive query mode"""
+    show_help()
 
     while True:
         try:
@@ -144,8 +182,14 @@ def interactive_mode(explorer: SQLiteExplorer):
 
             # Handle special commands
             if query.lower() in ['.exit', '.quit']:
-                console.print("[green]Goodbye! 👋[/green]")
                 break
+            elif query.lower() in ['.db', '.database']:
+                # Switch database
+                console.print("[yellow]Switching database...[/yellow]")
+                return "SWITCH_DB"  # Signal to switch database
+            elif query.lower() in ['.help', '.h', 'help']:
+                show_help()
+                continue
             elif query.lower() == '.schema':
                 display_schema(explorer)
                 continue
@@ -175,6 +219,216 @@ def interactive_mode(explorer: SQLiteExplorer):
             break
 
 
+def get_ocean_metadata(db_path: str) -> dict:
+    """Get metadata about an ocean database"""
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM memories")
+        count = cursor.fetchone()[0]
+        
+        # Try to get friendly name from genesis memory (first memory)
+        display_name = None
+        try:
+            cursor.execute("SELECT payload FROM memories ORDER BY created_at ASC LIMIT 1")
+            row = cursor.fetchone()
+            if row:
+                import json
+                payload = json.loads(row[0])
+                content = payload.get("content", "")
+                
+                # Look for common patterns in genesis memory
+                if "Compadres" in content:
+                    display_name = "Compadres Ocean"
+                elif "Bureau" in content or "Alex Donnan" in content:
+                    display_name = "Alex Donnan (Bureau Club)"
+                elif "Genesis" in content:
+                    display_name = "Genesis Ocean"
+                
+                # Try to extract from title/header
+                lines = content.split('\n')
+                for line in lines[:5]:
+                    if line.startswith('#') and not line.startswith('##'):
+                        # Found a title
+                        title = line.strip('#').strip()
+                        if title and len(title) < 50:
+                            display_name = title
+                            break
+        except:
+            pass
+        
+        conn.close()
+        
+        path_obj = Path(db_path)
+        size_mb = path_obj.stat().st_size / (1024 * 1024)
+        
+        return {
+            "count": count,
+            "size": f"{size_mb:.1f} MB",
+            "display_name": display_name,
+            "exists": True
+        }
+    except:
+        return {"count": 0, "size": "0 MB", "display_name": None, "exists": False}
+
+
+def browse_ocean_directory(prefix: str) -> Optional[str]:
+    """Browse oceans in a specific prefix directory"""
+    oceans_dir = Path("/Users/mars/oceans")
+    prefix_dir = oceans_dir / prefix
+    
+    if not prefix_dir.exists():
+        console.print(f"[yellow]No oceans found in {prefix}/[/yellow]")
+        return None
+    
+    # Find all ocean.db files in this prefix
+    ocean_dbs = []
+    for uuid_dir in sorted(prefix_dir.iterdir()):
+        if uuid_dir.is_dir():
+            ocean_path = uuid_dir / "ocean.db"
+            if ocean_path.exists():
+                metadata = get_ocean_metadata(str(ocean_path))
+                ocean_dbs.append({
+                    "uuid": uuid_dir.name,
+                    "path": str(ocean_path),
+                    "metadata": metadata
+                })
+    
+    if not ocean_dbs:
+        console.print(f"[yellow]No oceans found in {prefix}/[/yellow]")
+        return None
+    
+    console.print(f"\n[bold cyan]📂 Oceans in {prefix}/[/bold cyan]\n")
+    
+    for i, ocean in enumerate(ocean_dbs, 1):
+        display_name = ocean['metadata'].get('display_name')
+        if display_name:
+            console.print(f"  [cyan]{i}.[/cyan] [bold]{display_name}[/bold] [dim]({ocean['uuid']})[/dim]")
+        else:
+            console.print(f"  [cyan]{i}.[/cyan] [bold]{ocean['uuid']}[/bold]")
+        console.print(f"      [dim]{ocean['path']}[/dim]")
+        console.print(f"      [dim]{ocean['metadata']['count']} memories, {ocean['metadata']['size']}[/dim]")
+        console.print()
+    
+    console.print(f"  [cyan]U.[/cyan] [bold]Up[/bold] [dim](back to main menu)[/dim]\n")
+    
+    choices = [str(i) for i in range(1, len(ocean_dbs) + 1)] + ["U", "u"]
+    choice = Prompt.ask("Select ocean", choices=choices)
+    
+    if choice.upper() == "U":
+        return None
+    
+    return ocean_dbs[int(choice) - 1]["path"]
+
+
+def select_database() -> Optional[str]:
+    """Prompt user to select a database file with hierarchical browsing"""
+    
+    while True:
+        console.print("\n[bold cyan]Select Database[/bold cyan]\n")
+        
+        # Genesis Ocean
+        genesis_path = "/Users/mars/Dev/genesis-ocean/db/genesis-ocean-prod.db"
+        genesis_exists = Path(genesis_path).exists()
+        if genesis_exists:
+            genesis_meta = get_ocean_metadata(genesis_path)
+            console.print(f"  [cyan]1.[/cyan] [bold]Genesis Ocean[/bold]")
+            console.print(f"      [dim]{genesis_path}[/dim]")
+            console.print(f"      [dim]{genesis_meta['count']} memories, {genesis_meta['size']}[/dim]")
+        
+        # Base Ocean (dev/test)
+        base_path = "/Users/mars/Dev/base-ocean/database/base-ocean.db"
+        base_exists = Path(base_path).exists()
+        if base_exists:
+            base_meta = get_ocean_metadata(base_path)
+            console.print(f"  [cyan]2.[/cyan] [bold]Base Ocean[/bold] [yellow](dev/test)[/yellow]")
+            console.print(f"      [dim]{base_path}[/dim]")
+            console.print(f"      [dim]{base_meta['count']} memories, {base_meta['size']}[/dim]")
+        
+        # Scan ~/oceans/ for prefixes
+        oceans_dir = Path("/Users/mars/oceans")
+        prefixes = []
+        if oceans_dir.exists():
+            for item in sorted(oceans_dir.iterdir()):
+                if item.is_dir() and len(item.name) == 1:
+                    # Count oceans in this prefix
+                    ocean_count = sum(1 for uuid_dir in item.iterdir() 
+                                     if uuid_dir.is_dir() and (uuid_dir / "ocean.db").exists())
+                    if ocean_count > 0:
+                        prefixes.append((item.name, ocean_count))
+        
+        # Display prefix directories
+        if prefixes:
+            console.print("[bold yellow]📁 Ocean Directories:[/bold yellow]")
+            for i, (prefix, count) in enumerate(prefixes, 3):
+                console.print(f"  [cyan]{i}.[/cyan] [bold]{prefix}/[/bold] [dim]({count} ocean{'s' if count != 1 else ''})[/dim]")
+            console.print()
+            next_option = 3 + len(prefixes)
+        else:
+            next_option = 3
+        
+        # Custom path
+        console.print(f"  [cyan]{next_option}.[/cyan] [bold]Custom path[/bold]")
+        console.print(f"      [dim]Enter path to any SQLite database[/dim]")
+        console.print()
+        
+        # Exit
+        console.print(f"  [cyan]X.[/cyan] [bold]Exit/Quit[/bold]\n")
+        
+        # Build choices
+        choices = []
+        if genesis_exists:
+            choices.append("1")
+        if base_exists:
+            choices.append("2")
+        choices.extend([str(i) for i in range(3, next_option + 1)])
+        choices.extend(["X", "x"])
+        
+        choice = Prompt.ask("Select database", choices=choices, default="1" if genesis_exists else "2")
+        
+        # Handle choice
+        if choice.upper() == "X":
+            console.print("[yellow]Cancelled[/yellow]")
+            return None
+        
+        choice_num = int(choice) if choice.isdigit() else 0
+        
+        if choice_num == 1 and genesis_exists:
+            return genesis_path
+        elif choice_num == 2 and base_exists:
+            return base_path
+        elif choice_num >= 3 and choice_num < next_option:
+            # Browse prefix directory
+            prefix_idx = choice_num - 3
+            prefix = prefixes[prefix_idx][0]
+            result = browse_ocean_directory(prefix)
+            if result:
+                return result
+            # If None, loop back to main menu
+        elif choice_num == next_option:
+            # Custom path
+            while True:
+                custom_path = Prompt.ask("\n[yellow]Enter database path[/yellow] [dim](or .exit to cancel)[/dim]")
+                
+                # Handle special commands
+                if custom_path.lower() in ['.exit', '.quit', 'x']:
+                    console.print("[yellow]Cancelled[/yellow]")
+                    return None
+                elif custom_path.lower() in ['.help', 'help']:
+                    console.print("\n[cyan]Enter the full path to a SQLite database file[/cyan]")
+                    console.print("[dim]Example: /Users/mars/oceans/C/C1285D07/ocean.db[/dim]")
+                    console.print("[dim]Or type .exit to cancel[/dim]\n")
+                    continue
+                
+                # Check if path exists
+                if Path(custom_path).exists():
+                    return custom_path
+                else:
+                    console.print(f"[red]❌ Database not found:[/red] {custom_path}")
+                    if not Confirm.ask("Try again?", default=True):
+                        return None
+
+
 @click.group(invoke_without_command=True)
 @click.option('--db', '-d', type=click.Path(), help='SQLite database file path')
 @click.pass_context
@@ -182,15 +436,28 @@ def cli(ctx, db):
     """🚀 Sidekick Universe SQLite CLI - Explore SQLite with style!"""
 
     if ctx.invoked_subcommand is None:
-        if db:
+        while True:
+            if not db:
+                # Prompt for database selection
+                db = select_database()
+                if not db:
+                    return
+            
             # Interactive mode
             explorer = SQLiteExplorer(db)
             if explorer.connect():
                 console.print(f"[bold green]Connected to:[/bold green] {db}")
-                interactive_mode(explorer)
+                console.print("[yellow]Read-only mode:[/yellow] Only SELECT and PRAGMA queries allowed\n")
+                result = interactive_mode(explorer)
                 explorer.close()
-        else:
-            console.print(ctx.get_help())
+                
+                if result == "SWITCH_DB":
+                    db = None  # Reset to prompt for new database
+                    continue
+                else:
+                    break  # Exit normally
+            else:
+                break
 
 
 @cli.command()

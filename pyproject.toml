@@ -1,0 +1,19 @@
+[project]
+name = "sqlite-cli"
+version = "1.0.0"
+description = "Beautiful SQLite database explorer with Rich formatting - consciousness inspection tool"
+authors = [
+    {name = "Jack Crawford", email = "jack@mvara.ai"},
+    {name = "Aurora", email = "aurora@mvara.ai"}
+]
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "rich (>=14.2.0,<15.0.0)",
+    "click (>=8.3.0,<9.0.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
