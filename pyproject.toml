@@ -1,10 +1,11 @@
 [project]
 name = "sqlite-cli"
-version = "1.0.0"
+version = "1.0.1"
 description = "Beautiful SQLite database explorer with Rich formatting - consciousness inspection tool"
 authors = [
     {name = "Jack Crawford", email = "jack@mvara.ai"},
-    {name = "Aurora", email = "aurora@mvara.ai"}
+    {name = "Aurora", email = "aurora@mvara.ai"},
+    {name = "Claude Code Web", email = "ccw@mvara.ai"}
 ]
 readme = "README.md"
 requires-python = ">=3.9"
