@@ -192,10 +192,11 @@ def show_help():
         "  [cyan].help[/cyan] - Show this help\n"
         "  [cyan].exit[/cyan] or [cyan].quit[/cyan] - Exit to command line\n\n"
         "[bold yellow]SQL Queries:[/bold yellow]\n"
-        "Just type any SQL statement and press Enter:\n"
-        "  [dim]SELECT * FROM memories[/dim]\n"
-        "  [dim]SELECT memory_uuid, created_at FROM memories LIMIT 5[/dim]\n"
-        "  [dim]SELECT json_extract(payload, '$.gist') FROM memories[/dim]",
+        "Multi-line queries supported - end with semicolon:\n"
+        "  [dim]SELECT * FROM memories;[/dim]\n"
+        "  [dim]SELECT m1.memory_uuid, m1.parent_uuid[/dim]\n"
+        "  [dim]FROM memories m1[/dim]\n"
+        "  [dim]WHERE m1.parent_uuid IS NOT NULL;[/dim]",
         border_style="blue"
     ))
 
@@ -204,47 +205,66 @@ def interactive_mode(explorer: SQLiteExplorer):
     """Run interactive query mode"""
     show_help()
 
+    query_buffer = []
+    
     while True:
         try:
-            query = Prompt.ask("\n[bold yellow]sqlite>[/bold yellow]")
-
-            if not query.strip():
-                continue
-
-            # Handle special commands
-            if query.lower() in ['.exit', '.quit']:
-                break
-            elif query.lower() in ['.db', '.database']:
-                # Switch database
-                console.print("[yellow]Switching database...[/yellow]")
-                return "SWITCH_DB"  # Signal to switch database
-            elif query.lower() in ['.help', '.h', 'help']:
-                show_help()
-                continue
-            elif query.lower() == '.schema':
-                display_schema(explorer)
-                continue
-            elif query.lower() == '.tables':
-                tables = explorer.get_tables()
-                console.print("[bold]Tables:[/bold]")
-                for table in tables:
-                    count = explorer.get_table_count(table)
-                    console.print(f"  • [cyan]{table}[/cyan] [dim]({count} rows)[/dim]")
-                continue
-
-            # Execute query
-            success, results, message = explorer.execute_query(query)
-
-            if success:
-                if results is not None:
-                    display_results(results)
-                else:
-                    console.print(f"[green]✓[/green] {message}")
+            # Use different prompt for continuation lines
+            if query_buffer:
+                prompt_text = "[bold yellow]   ...>[/bold yellow]"
             else:
-                console.print(f"[bold red]Error:[/bold red] {message}")
+                prompt_text = "[bold yellow]sqlite>[/bold yellow]"
+            
+            line = Prompt.ask(f"\n{prompt_text}")
+
+            if not line.strip():
+                continue
+
+            # Handle special commands (only on first line)
+            if not query_buffer:
+                if line.lower() in ['.exit', '.quit']:
+                    break
+                elif line.lower() in ['.db', '.database']:
+                    # Switch database
+                    console.print("[yellow]Switching database...[/yellow]")
+                    return "SWITCH_DB"  # Signal to switch database
+                elif line.lower() in ['.help', '.h', 'help']:
+                    show_help()
+                    continue
+                elif line.lower() == '.schema':
+                    display_schema(explorer)
+                    continue
+                elif line.lower() == '.tables':
+                    tables = explorer.get_tables()
+                    console.print("[bold]Tables:[/bold]")
+                    for table in tables:
+                        count = explorer.get_table_count(table)
+                        console.print(f"  • [cyan]{table}[/cyan] [dim]({count} rows)[/dim]")
+                    continue
+
+            # Add line to buffer
+            query_buffer.append(line)
+            
+            # Check if query is complete (ends with semicolon)
+            if line.rstrip().endswith(';'):
+                # Join all lines and execute
+                query = ' '.join(query_buffer)
+                query_buffer = []  # Reset buffer
+                
+                # Execute query
+                success, results, message = explorer.execute_query(query)
+
+                if success:
+                    if results is not None:
+                        display_results(results)
+                    else:
+                        console.print(f"[green]✓[/green] {message}")
+                else:
+                    console.print(f"[bold red]Error:[/bold red] {message}")
 
         except KeyboardInterrupt:
             console.print("\n[yellow]Use .exit or .quit to exit[/yellow]")
+            query_buffer = []  # Clear buffer on interrupt
         except EOFError:
             console.print("\n[green]Goodbye! 👋[/green]")
             break
